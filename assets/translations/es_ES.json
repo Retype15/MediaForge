@@ -1,0 +1,15 @@
+{
+    "app_title": "MediaForge - Gestor de Medios",
+    "scan_button": "Escanear Rutas",
+    "status_ready": "Listo.",
+    "status_scanning": "Escaneando... {progress}%",
+    "status_scan_finished": "Escaneo finalizado.",
+    "menu_file": "&Archivo",
+    "menu_settings": "&Configuración...",
+    "menu_exit": "&Salir",
+    "settings_title": "Configuración de MediaForge",
+    "tab_general": "General",
+    "label_language": "Idioma:",
+    "restart_required_title": "Reinicio Requerido",
+    "restart_required_body": "El cambio de idioma se aplicará la próxima vez que inicie la aplicación."
+}

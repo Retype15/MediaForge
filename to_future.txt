@@ -1,0 +1,18 @@
+- Advertencia sobre la primera vez que se ejecuta el escaneo, para indicar que esto será solo la primera vez.
+- Opciones de debugeo en la seccion de herramientas.
+- Opcion para activar el modo desarrollador desde las opciones.
+- Incluir por serie y también por capítulo un boton para 'ignorar' esa serie/capitulo en la actual y futuros escaneos(guardar la ruta(ej: 'takopii no genzai' o 'takopii no genzai/S1E4' que serán ignorados esas rutas u archivos en los futuros escaneos))
+- al pararse encima de un elemento se ilumine
+- al hacer doble click se intente abrir el archivo
+- al hacer click derecho aparecer el menú de opciones sobre ese archivo, opciones como: (eliminar|copiar|mover|abrir|info|etc).
+- Mostrar un boton de mostrar/ocultar por cada titulo y capitulo(sub-titulo)(hacer este elemento desplegable para mejor accesibilidad)
+- Botón de eliminar del historial para quitar rutas obsoletas o que ya no se volveran a usar(mostrar advertencia genérica que indique que hacer eso eliminará de la base de datos lo escaneado).
+- Un botón de ordenación, que permitirá ordenar los elementos resultantes por: Nombre|tipo|porcentaje de parecencia|etc...
+- El sistema de recomendaciones en base a las preferencias y los metadatos de los archivos
+- textbox al lado del titulo de capítulo con el nombre recomendado para dar a ese elemento, el cual se puede modificar para personalizar en caso de serlo útil.
+- Botón en el archivo que se marcó para mantener para aplicar el nombre recomendado
+- selectbox para seleccionar la carpeta(ruta) de entre las versiones que se propusieron para seleccionar cúal será la real a donde irán los archivos
+- Además de encontrar duplicados, el módulo tambien deberá identificar capítulos de una misma serie /pelicula etc en diferentes rutas pero que debería unificarse en una sola carpeta(tener cuidado esto, ya que diferentes temporadas o partes pueden estar en subcarpetas de la carpeta principal de la serie)[Mejora para futuro]
+
+Opcional:
+- dejar al usuario elejir cuantos subprocesos quiere que hayan simultaneamente.

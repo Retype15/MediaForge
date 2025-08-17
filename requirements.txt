@@ -1,0 +1,5 @@
+PyQt6
+parse-torrent-name
+thefuzz
+python-levenshtein
+ffmpeg-python

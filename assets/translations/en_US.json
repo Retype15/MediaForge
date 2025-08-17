@@ -1,0 +1,15 @@
+{
+    "app_title": "MediaForge - Media Manager",
+    "scan_button": "Scan Paths",
+    "status_ready": "Ready.",
+    "status_scanning": "Scanning... {progress}%",
+    "status_scan_finished": "Scan finished.",
+    "menu_file": "&File",
+    "menu_settings": "&Settings...",
+    "menu_exit": "&Exit",
+    "settings_title": "MediaForge Settings",
+    "tab_general": "General",
+    "label_language": "Language:",
+    "restart_required_title": "Restart Required",
+    "restart_required_body": "The language change will be applied the next time you start the application."
+}
