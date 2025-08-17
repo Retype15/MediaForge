@@ -15,7 +15,7 @@ def format_size(size_bytes):
     s = round(size_bytes / p, 2)
     return f"{s} {size_name[i]}"
 
-def standardize_text(text: str) -> str:
+def standardize_text(text: str):
     clean = text.lower()
     clean = re.sub(r'[\(\[].*?[\)\]]', '', clean)
     clean = re.sub(r'season|temporada', 's', clean)
@@ -25,7 +25,7 @@ def standardize_text(text: str) -> str:
     return clean
 
 class FileEntryWidget(QFrame):
-    recommendation_changed = pyqtSignal(str)
+    action_button_clicked = pyqtSignal()
 
     def __init__(self, media_file, parent=None):
         super().__init__(parent)
@@ -41,86 +41,103 @@ class FileEntryWidget(QFrame):
         font = filename_label.font(); font.setBold(True); filename_label.setFont(font)
         path_label = QLabel(str(media_file.path.parent))
         path_label.setStyleSheet("color: #aaa;")
-        info_layout.addWidget(filename_label)
-        info_layout.addWidget(path_label)
-        layout.addLayout(info_layout)
-        layout.addStretch()
-
-        quality = media_file.parsed_info.get('resolution', 'N/A')
-        codec = media_file.parsed_info.get('codec', '')
-        metadata_text = f"{quality} | {codec} | {format_size(media_file.size)}"
-        metadata_label = QLabel(metadata_text)
-        metadata_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        layout.addWidget(metadata_label)
-        layout.addSpacing(15)
+        info_layout.addWidget(filename_label); info_layout.addWidget(path_label)
         
-        self.keep_button = QPushButton("Mantener")
-        self.delete_button = QPushButton("Eliminar")
-        self.keep_button.setFixedWidth(80)
-        self.delete_button.setFixedWidth(80)
-        self.keep_button.setCheckable(True)
-        self.delete_button.setCheckable(True)
-        self.keep_button.clicked.connect(lambda: self.recommendation_changed.emit('KEEP'))
-        self.delete_button.clicked.connect(lambda: self.recommendation_changed.emit('DELETE'))
-        layout.addWidget(self.keep_button)
-        layout.addWidget(self.delete_button)
-        layout.addSpacing(10)
+        layout.addLayout(info_layout); layout.addStretch()
 
-        info_button = QPushButton("i")
-        info_button.setFixedSize(25, 25)
+        self.metadata_label = QLabel()
+        self.metadata_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(self.metadata_label); layout.addSpacing(15)
+        
+        self.action_button = QPushButton(); self.action_button.setFixedWidth(90) # Un poco más ancho para "Confirmar?"
+        # --- INICIO DE CORRECCIÓN: Conectar al ciclo interno directamente ---
+        self.action_button.clicked.connect(self.cycle_state_and_notify)
+        # --- FIN DE CORRECCIÓN ---
+        layout.addWidget(self.action_button); layout.addSpacing(10)
+
+        info_button = QPushButton("i"); info_button.setFixedSize(25, 25)
+        info_button.setObjectName("infoButton")
         info_button.setToolTip("Mostrar metadatos detallados")
         info_button.clicked.connect(self._show_metadata)
         layout.addWidget(info_button)
         
         self.update_style()
+    
+    def cycle_state_and_notify(self):
+        """El único método llamado por el clic del botón."""
+        current_state = self.media_file.recommendation
+        
+        # Lógica de ciclo interna del botón
+        if current_state in ['REVIEW', 'SUGGESTED']:
+            self.media_file.recommendation = 'KEEP'
+        elif current_state == 'KEEP':
+            self.media_file.recommendation = 'DELETE'
+        else: # DELETE
+            self.media_file.recommendation = 'KEEP' # El ciclo ahora es solo KEEP <-> DELETE
+        
+        self.update_style()
+        self.action_button_clicked.emit()
+
+    def set_state(self, state: str, update_style=True):
+        if state in ['REVIEW', 'SUGGESTED', 'KEEP', 'DELETE']:
+            self.media_file.recommendation = state
+            if update_style:
+                self.update_style()
 
     def update_style(self):
-        is_keep = self.media_file.recommendation == 'KEEP'
-        self.keep_button.setChecked(is_keep)
-        self.delete_button.setChecked(not is_keep)
+        # ... (esta función se mantiene exactamente igual, no necesita cambios)
+        state = self.media_file.recommendation
+        quality = self.media_file.parsed_info.get('resolution', 'N/A')
+        codec = self.media_file.parsed_info.get('codec', '')
+        metadata_text = f"{quality} | {codec} | {format_size(self.media_file.size)}"
+        self.metadata_label.setText(metadata_text)
+        style_sheet = ""
+        button_width = 80
+        if state == 'KEEP':
+            self.action_button.setText("Mantener")
+            style_sheet = "QPushButton { background-color: #6a9c6a; border: 1px solid #8ac88a; }"
+            self.setObjectName("FileEntryWidgetKeep")
+        elif state == 'DELETE':
+            self.action_button.setText("Eliminar")
+            style_sheet = "QPushButton { background-color: #9c6a6a; border: 1px solid #c88a8a; }"
+            self.setObjectName("FileEntryWidgetDelete")
+        elif state == 'SUGGESTED':
+            self.action_button.setText("Confirmar?")
+            button_width = 90
+            style_sheet = "QPushButton { background-color: #a19c48; border: 1px solid #c8c25a; }"
+            self.setObjectName("FileEntryWidget")
+        else: # REVIEW
+            self.action_button.setText("Decidir")
+            style_sheet = "QPushButton { background-color: #555; border: 1px solid #777; }"
+            self.setObjectName("FileEntryWidget")
+        self.action_button.setFixedWidth(button_width)
+        self.setStyleSheet(f"""
+            #FileEntryWidget {{ background-color: transparent; border: 1px solid #2c2c2c; border-radius: 3px; }}
+            #FileEntryWidget:hover {{ background-color: #4a4a4a; }}
+            #FileEntryWidgetKeep {{ background-color: #384838; border: 1px solid #5a785a; border-radius: 3px; }}
+            #FileEntryWidgetKeep:hover {{ background-color: #4a5c4a; }}
+            #FileEntryWidgetDelete QLabel {{ color: #888; }}
+            {style_sheet}
+        """)
 
-        if is_keep:
-            self.setStyleSheet("""
-                #FileEntryWidget { background-color: #384838; border: 1px solid #5a785a; border-radius: 3px; }
-                #FileEntryWidget:hover { background-color: #4a5c4a; }
-                QPushButton:checked { background-color: #6a9c6a; border: 1px solid #8ac88a; }
-            """)
-        else:
-            self.setStyleSheet("""
-                #FileEntryWidget { background-color: transparent; border: 1px solid #2c2c2c; border-radius: 3px; }
-                #FileEntryWidget QLabel { color: #888; }
-                #FileEntryWidget:hover { background-color: #4a4a4a; }
-                QPushButton:checked { background-color: #9c6a6a; border: 1px solid #c88a8a; }
-            """)
-    
+    # ... (el resto de FileEntryWidget no necesita cambios)
     def _open_file(self):
-        try:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.media_file.path)))
-        except Exception as e:
-            print(f"Error al abrir el archivo {self.media_file.path}: {e}")
-
+        try: QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.media_file.path)))
+        except Exception as e: print(f"Error al abrir el archivo {self.media_file.path}: {e}")
     def mouseDoubleClickEvent(self, event):
-        self._open_file()
-        event.accept()
-
+        self._open_file(); event.accept()
     def contextMenuEvent(self, event):
         context_menu = QMenu(self)
-        info_action = QAction("Información Detallada", self)
-        info_action.triggered.connect(self._show_metadata)
-        open_action = QAction("Abrir Archivo", self)
-        open_action.triggered.connect(self._open_file)
+        info_action = QAction("Información Detallada", self); info_action.triggered.connect(self._show_metadata)
+        open_action = QAction("Abrir Archivo", self); open_action.triggered.connect(self._open_file)
         open_folder_action = QAction("Abrir Carpeta Contenedora", self)
         open_folder_action.triggered.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.media_file.path.parent))))
         move_action = QAction("Mover a...", self); move_action.setEnabled(False)
         delete_action = QAction("Eliminar (Enviar a Papelera)", self); delete_action.setEnabled(False)
-        
-        context_menu.addAction(info_action)
-        context_menu.addSeparator()
-        context_menu.addAction(open_action); context_menu.addAction(open_folder_action)
-        context_menu.addSeparator()
+        context_menu.addAction(info_action); context_menu.addSeparator()
+        context_menu.addAction(open_action); context_menu.addAction(open_folder_action); context_menu.addSeparator()
         context_menu.addAction(move_action); context_menu.addAction(delete_action)
         context_menu.exec(event.globalPos())
-
     def _show_metadata(self):
         parsed_info_str = pprint.pformat(self.media_file.parsed_info, indent=2)
         if self.media_file.metadata_info:
@@ -137,7 +154,6 @@ class FileEntryWidget(QFrame):
 
 class CollapsibleFrame(QFrame):
     ignore_requested = pyqtSignal()
-
     def __init__(self, title, parent=None):
         super().__init__(parent)
         self.is_expanded = True
@@ -152,14 +168,10 @@ class CollapsibleFrame(QFrame):
         self.ignore_button.setToolTip("Ignorar este grupo en futuros escaneos")
         self.ignore_button.setStyleSheet("border: none; font-size: 14px;")
         self.ignore_button.clicked.connect(lambda: self.ignore_requested.emit())
-        
-        header_layout.addWidget(self.toggle_button); header_layout.addWidget(self.title_label, stretch=1)
-        header_layout.addWidget(self.ignore_button)
-        
+        header_layout.addWidget(self.toggle_button); header_layout.addWidget(self.title_label, stretch=1); header_layout.addWidget(self.ignore_button)
         self.content_frame = QWidget(); self.content_layout = QVBoxLayout(self.content_frame)
         self.content_layout.setContentsMargins(10, 5, 10, 5)
         self.main_layout.addWidget(self.header_frame); self.main_layout.addWidget(self.content_frame)
-    
     def toggle(self):
         self.is_expanded = not self.is_expanded; self.content_frame.setVisible(self.is_expanded)
         self.toggle_button.setText("▼" if self.is_expanded else "►")
@@ -168,49 +180,58 @@ class CollapsibleFrame(QFrame):
         self.toggle_button.setText("▼" if self.is_expanded else "►")
 
 class DuplicateGroupWidget(CollapsibleFrame):
-    ignore_episode_requested = pyqtSignal(str)
-    
-    def __init__(self, duplicate_group, series_id: str, parent=None):
+    ignore_episode_requested = pyqtSignal(str, str)
+    ignore_movie_requested = pyqtSignal(str, str)
+    def __init__(self, duplicate_group, series_id: str, is_movie: bool = False, parent=None):
         super().__init__(duplicate_group.display_title, parent)
         self.group = duplicate_group
-        self.episode_id = f"{series_id}/{duplicate_group.group_id}"
-        self.ignore_requested.connect(lambda: self.ignore_episode_requested.emit(self.episode_id))
-        
+        self.series_id = series_id
+        self.is_movie = is_movie
+        self.first_selection_done = False
+        if self.is_movie:
+            self.movie_id = self.series_id
+            self.ignore_requested.connect(lambda: self.ignore_movie_requested.emit(self.movie_id, 'MOVIE'))
+        else:
+            self.episode_id = f"{series_id}/{duplicate_group.group_id}"
+            self.ignore_requested.connect(lambda: self.ignore_episode_requested.emit(self.episode_id, 'EPISODE'))
         self.setFrameShape(QFrame.Shape.StyledPanel); self.setObjectName("DuplicateGroupWidget")
         self.setStyleSheet("#DuplicateGroupWidget { border: 1px solid #444; }")
         font = self.title_label.font(); font.setPointSize(12); font.setBold(True); self.title_label.setFont(font)
-        
         for media_file in self.group.files:
             file_widget = FileEntryWidget(media_file)
-            file_widget.recommendation_changed.connect(lambda state, mf=media_file: self.handle_recommendation_change(mf, state))
+            file_widget.action_button_clicked.connect(lambda fw=file_widget: self.handle_action_change(fw))
             self.content_layout.addWidget(file_widget)
         self.set_expanded(True)
 
-    def handle_recommendation_change(self, changed_file, new_state: str):
-        if new_state == 'KEEP':
+    def handle_action_change(self, changed_widget: FileEntryWidget):
+        # --- INICIO DE CORRECCIÓN: LÓGICA DE PRIMERA SELECCIÓN Y CICLO BINARIO ---
+        if not self.first_selection_done:
+            self.first_selection_done = True
+            # El estado ya fue cambiado a KEEP por el propio widget.
+            # Solo necesitamos actualizar el resto.
             for i in range(self.content_layout.count()):
-                file_widget = self.content_layout.itemAt(i).widget()
-                if isinstance(file_widget, FileEntryWidget):
-                    is_winner = file_widget.media_file is changed_file
-                    file_widget.media_file.recommendation = 'KEEP' if is_winner else 'DELETE'
-                    file_widget.update_style()
+                widget = self.content_layout.itemAt(i).widget()
+                if isinstance(widget, FileEntryWidget) and widget is not changed_widget:
+                    widget.set_state('DELETE')
+        # Después de la primera selección, el ciclo interno de cada widget maneja el resto.
+        # El padre ya no necesita intervenir.
+        # --- FIN DE CORRECCIÓN ---
 
 class SeriesGroupWidget(CollapsibleFrame):
-    ignore_requested_signal = pyqtSignal(str, str) # key, level
+    ignore_series_requested = pyqtSignal(str, str)
 
     def __init__(self, series_title, duplicate_groups, parent=None):
         super().__init__(series_title, parent)
         self.series_id = standardize_text(series_title)
-        self.ignore_requested.connect(lambda: self.ignore_requested_signal.emit(self.series_id, 'SERIES'))
+        self.ignore_requested.connect(lambda: self.ignore_series_requested.emit(self.series_id, 'SERIES'))
         
-        self.setFrameShape(QFrame.Shape.NoFrame); self.header_frame.setObjectName("SeriesHeader")
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        self.header_frame.setObjectName("SeriesHeader")
         self.header_frame.setStyleSheet("#SeriesHeader { background-color: #2c2c2c; }")
         font = self.title_label.font(); font.setPointSize(16); self.title_label.setFont(font)
         
         for group in sorted(duplicate_groups, key=lambda g: g.group_id):
-            episode_widget = DuplicateGroupWidget(group, self.series_id)
-            episode_widget.ignore_episode_requested.connect(
-                lambda episode_id: self.ignore_requested_signal.emit(episode_id, 'EPISODE')
-            )
+            episode_widget = DuplicateGroupWidget(group, self.series_id, is_movie=False)
             self.content_layout.addWidget(episode_widget)
+            
         self.set_expanded(False)

@@ -112,8 +112,14 @@ class SidePanel(QWidget):
         self.history_layout = QVBoxLayout(self.history_widget); self.history_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.history_scroll.setWidgetResizable(True); self.history_scroll.setWidget(self.history_widget)
         self.main_layout.addWidget(history_label); self.main_layout.addWidget(self.history_scroll, stretch=2)
-    def clear_layouts(self):
-        for layout in [self.active_layout, self.history_layout]:
-            while layout.count():
-                child = layout.takeAt(0)
+    
+    def clear_layouts(self, clear_active=True, clear_history=True):
+        if clear_active:
+            while self.active_layout.count():
+                child = self.active_layout.takeAt(0)
+                if child.widget(): child.widget().deleteLater()
+        
+        if clear_history:
+            while self.history_layout.count():
+                child = self.history_layout.takeAt(0)
                 if child.widget(): child.widget().deleteLater()

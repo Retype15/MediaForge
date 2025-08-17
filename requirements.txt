@@ -3,3 +3,4 @@ parse-torrent-name
 thefuzz
 python-levenshtein
 ffmpeg-python
+send2trash
