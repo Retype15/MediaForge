@@ -14,5 +14,20 @@
 - selectbox para seleccionar la carpeta(ruta) de entre las versiones que se propusieron para seleccionar cúal será la real a donde irán los archivos
 - Además de encontrar duplicados, el módulo tambien deberá identificar capítulos de una misma serie /pelicula etc en diferentes rutas pero que debería unificarse en una sola carpeta(tener cuidado esto, ya que diferentes temporadas o partes pueden estar en subcarpetas de la carpeta principal de la serie)[Mejora para futuro]
 
-Opcional:
+- Arreglar el sistema de eliminar los archivos marcados.
+
+- Propuesta 4.2: Añadir un Resumen de Acciones.
+    - Antes de que el usuario haga clic en "Aplicar Acciones", no sabe cuánto espacio va a liberar o cuántos archivos va a eliminar.
+    - Solución: En MainWindow, añade un QLabel cerca del botón "Aplicar Acciones". A medida que el usuario marca archivos como DELETE, actualiza dinámicamente este label para que muestre algo como: Seleccionado para eliminar: 152 archivos (1.2 TB). Esto da al usuario una confirmación visual inmediata del impacto de sus acciones.
+
+- Propuesta 4.3: Previsualización de Archivos (Thumbnail).
+    - Una imagen vale más que mil palabras. Poder ver una miniatura del vídeo ayudaría al usuario a decidir.
+    - Solución:
+        1. En FileEntryWidget, añade un pequeño QLabel para la miniatura.
+        2. Crea un ThumbnailWorker (otro QThread) que use ffmpeg para extraer un fotograma de un archivo de vídeo (ej. en el segundo 30).
+        3. Cuando el cursor del ratón se posa sobre un FileEntryWidget (enterEvent), si la miniatura no está en caché (puedes guardarlas en una carpeta thumbs_cache), lanza el ThumbnailWorker.
+        4. Cuando el worker termine, emite una señal con la ruta de la imagen generada, y el FileEntryWidget la muestra.
+
+
+Malas opciones:
 - dejar al usuario elejir cuantos subprocesos quiere que hayan simultaneamente.

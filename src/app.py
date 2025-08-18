@@ -5,24 +5,66 @@ from PyQt6.QtCore import Qt
 
 from src.core.config_manager import ConfigManager
 from src.utils.translator import ts
-from src.ui.main_window import MainWindow
 from src.utils.metadata_extractor import MetadataExtractor
 from src.core.cache_manager import CacheManager
+from src.ui.hub_window import HubWindow
+from src.ui.duplicate_finder_window import DuplicateFinderWindow
 
 class App:
     def __init__(self):
         self.qt_app = QApplication(sys.argv)
         self.config_manager = ConfigManager()
         self.cache_manager = CacheManager()
+        self.current_tool_window = None
+
+        # --- Definición de las herramientas disponibles ---
+        self.TOOLS_CONFIG = [
+            {
+                'id': 'duplicate_finder',
+                'name': ts.t('tool_duplicate_finder_name', 'Buscador de Duplicados'),
+                'icon': 'assets/images/duplicate_icon.png', # Necesitarás este icono
+                'class': DuplicateFinderWindow
+            },
+            # ... Aquí añadirías futuras herramientas ...
+            # {
+            #     'id': 'media_organizer',
+            #     'name': ts.t('tool_media_organizer_name', 'Organizador de Medios'),
+            #     'icon': 'assets/images/organizer_icon.png',
+            #     'class': MediaOrganizerWindow # Una futura clase
+            # },
+        ]
         
         self._setup_style()
         self._setup_translator()
-        self._setup_ffmpeg_path() # <-- NUEVA LLAMADA
+        self._setup_ffmpeg_path()
         
-        self.main_window = MainWindow(self.config_manager, self.cache_manager)
+        # --- Lógica de arranque modificada ---
+        self.hub_window = HubWindow(self.TOOLS_CONFIG, self.config_manager)
+        self.hub_window.tool_launched.connect(self.launch_tool)
+
+    def launch_tool(self, tool_id: str):
+        tool_data = next((tool for tool in self.TOOLS_CONFIG if tool['id'] == tool_id), None)
+        if not tool_data:
+            print(f"Error: No se encontró la herramienta con ID '{tool_id}'")
+            return
+
+        # Ocultar el hub antes de mostrar la herramienta para evitar parpadeos
+        self.hub_window.hide()
+
+        ToolWindowClass = tool_data['class']
+        self.current_tool_window = ToolWindowClass(self.config_manager, self.cache_manager)
+        
+        # Conectar la señal de cierre para volver a mostrar el hub
+        self.current_tool_window.closing.connect(self.show_hub)
+        
+        self.current_tool_window.show()
+
+    def show_hub(self):
+        self.current_tool_window = None # Liberar la referencia
+        self.hub_window.show()
+        # Aquí podrías refrescar la lista de "recientes" si la implementas
 
     def _setup_style(self):
-        # ... (sin cambios) ...
         self.qt_app.setStyle("Fusion")
         dark_palette = QPalette()
         dark_palette.setColor(QPalette.ColorRole.Window, QColor(53, 53, 53))
@@ -49,5 +91,5 @@ class App:
         MetadataExtractor.set_ffmpeg_path(ffmpeg_path)
 
     def run(self):
-        self.main_window.show()
+        self.hub_window.show()
         sys.exit(self.qt_app.exec())

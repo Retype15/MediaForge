@@ -2,6 +2,7 @@ import ffmpeg # type: ignore
 from pathlib import Path
 from typing import Dict, Optional
 import os
+import sys
 
 class MetadataExtractor:
     _ffmpeg_exec = "ffmpeg"
@@ -10,19 +11,22 @@ class MetadataExtractor:
     @classmethod
     def set_ffmpeg_path(cls, path: str):
         if path and os.path.isdir(path):
-            # ---- INICIO DE LA CORRECCIÓN ----
-            # Normalizar la ruta para el sistema operativo actual
             normalized_path = os.path.normpath(path)
-            ffmpeg_exe_path = os.path.join(normalized_path, "ffmpeg.exe")
-            ffprobe_exe_path = os.path.join(normalized_path, "ffprobe.exe")
-            # ---- FIN DE LA CORRECCIÓN ----
-            
+
+            # Determinar el nombre del ejecutable según el SO
+            exe_suffix = ".exe" if sys.platform == "win32" else ""
+            ffmpeg_exe_name = f"ffmpeg{exe_suffix}"
+            ffprobe_exe_name = f"ffprobe{exe_suffix}"
+
+            ffmpeg_exe_path = os.path.join(normalized_path, ffmpeg_exe_name)
+            ffprobe_exe_path = os.path.join(normalized_path, ffprobe_exe_name)
+
             if os.path.exists(ffmpeg_exe_path) and os.path.exists(ffprobe_exe_path):
                 cls._ffmpeg_exec = ffmpeg_exe_path
                 cls._ffprobe_exec = ffprobe_exe_path
                 print(f"FFprobe path set to: {cls._ffprobe_exec}")
             else:
-                print(f"Warning: ffmpeg.exe or ffprobe.exe not found in '{normalized_path}'. Using system PATH.")
+                print(f"Warning: '{ffmpeg_exe_name}' or '{ffprobe_exe_name}' not found in '{normalized_path}'. Using system PATH.")
         else:
             cls._ffmpeg_exec = "ffmpeg"
             cls._ffprobe_exec = "ffprobe"

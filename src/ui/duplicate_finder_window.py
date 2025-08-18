@@ -1,11 +1,12 @@
 from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QWidget, QPushButton, QProgressBar,
                              QStatusBar, QHBoxLayout, QFileDialog, QMessageBox, QScrollArea,
                              QFrame, QToolBar, QLabel)
-from PyQt6.QtGui import QAction
-from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QAction, QIcon
+from PyQt6.QtCore import Qt, pyqtSignal
 
 from src.utils.translator import ts
-from src.core.workers import ScanWorker, standardize_text
+from src.utils.text_parser import standardize_text
+from src.core.workers import ScanWorker
 from src.ui.dialogs.settings_dialog import SettingsDialog
 from src.modules.scanners.default_scanner import DefaultScanner
 from src.modules.matchers.media_name_matcher import MediaNameMatcher
@@ -15,7 +16,9 @@ from src.ui.widgets.duplicate_widgets import (SeriesGroupWidget, DuplicateGroupW
 from src.ui.dialogs.action_confirm_dialog import ActionConfirmDialog, ConfirmDialog
 from src.core.action_worker import ActionWorker
 
-class MainWindow(QMainWindow):
+class DuplicateFinderWindow(QMainWindow):
+    closing = pyqtSignal()
+
     def __init__(self, config_manager, cache_manager):
         super().__init__()
         self.config = config_manager
@@ -25,6 +28,7 @@ class MainWindow(QMainWindow):
         self.result_widgets = {}
 
         self.setWindowTitle(ts.t('app_title', 'MediaForge'))
+        self.setWindowIcon(QIcon("assets/images/logo_transparent.png"))
         self.setGeometry(100, 100, 1280, 720)
 
         self._create_actions_and_menus()
@@ -79,6 +83,11 @@ class MainWindow(QMainWindow):
         self.load_paths_from_cache()
 
     def _create_actions_and_menus(self):
+        toolbar = QToolBar("Main Toolbar")
+        self.addToolBar(toolbar)
+        back_action = QAction(QIcon("assets/images/home_icon.png"), ts.t('back_to_hub', "Volver al Menú"), self)
+        back_action.triggered.connect(self.close) # Simplemente cierra esta ventana
+        toolbar.addAction(back_action)
         menu_bar = self.menuBar()
         file_menu = menu_bar.addMenu(ts.t('menu_file', '&Archivo'))
         settings_action = QAction(ts.t('menu_settings', '&Configuración...'), self)
@@ -268,3 +277,11 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "Acciones Completadas", "Los archivos seleccionados han sido enviados a la papelera.")
         self.status_bar.showMessage("Acciones completadas. Refrescando...")
         self._start_scan() # Refrescar la vista
+
+    def closeEvent(self, event):
+        """
+        Sobrescribe el evento de cierre para notificar al controlador principal
+        antes de que la ventana se destruya.
+        """
+        self.closing.emit()
+        super().closeEvent(event)

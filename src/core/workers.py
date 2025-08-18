@@ -5,47 +5,14 @@ from PyQt6.QtCore import QObject, QThread, pyqtSignal
 from src.modules.base import ScannerBase, MatcherBase
 from src.core.models import MediaFile
 from src.utils.metadata_extractor import MetadataExtractor
+from src.utils.text_parser import robust_parse_episode, standardize_text
 from src.core.cache_manager import CacheManager
 from src.core.recommender import Recommender
 from src.core.config_manager import ConfigManager
+
 import re
+from typing import Optional, Tuple, List, Dict, Set
 from collections import defaultdict
-from typing import Optional, Tuple, List
-
-# Requerido por el worker para el parseo inicial antes de cachear
-RE_EPISODE_PATTERNS = [
-    (re.compile(r'[._\s-][Ss]([0-9]{1,2})[._\s-]?[Ee]([0-9]{1,3}(?:\.5)?)[._\s-]?'), 'SE'),
-    (re.compile(r'[._\s-]([0-9]{1,2})[xX]([0-9]{1,3}(?:\.5)?)[._\s-]?'), 'SE'),
-    (re.compile(r'[._\s-][Ss]([0-9]{1,2})(?:[._\s-]?[EeSs][0-9]{1,2})*[._\s-]?[Ee]([0-9]{1,3}(?:\.5)?)'), 'MULTI_SE'),
-    (re.compile(r'(?:^|[\s_.-])([0-9]{1,3}(?:\.5)?)(?:\.\w+$|[\s_.-])'), 'E_ONLY_ISOLATED'),
-]
-RE_SEASON_ONLY = re.compile(r'[._\s-][Ss](eason)?[._\s-]?([0-9]{1,2})[._\s-]?')
-
-def robust_parse_episode(filename: str) -> Optional[Tuple[int, float]]:
-    for pattern, p_type in RE_EPISODE_PATTERNS:
-        match = pattern.search(filename)
-        if match:
-            try:
-                if p_type == 'SE':
-                    return int(match.group(1)), float(match.group(2).replace(',', '.'))
-                if p_type == 'MULTI_SE':
-                    return int(match.group(1)), float(match.group(2).replace(',', '.'))
-                if p_type == 'E_ONLY_ISOLATED':
-                    season_match = RE_SEASON_ONLY.search(filename)
-                    season = int(season_match.group(2)) if season_match else 1
-                    return season, float(match.group(1).replace(',', '.'))
-            except (ValueError, IndexError):
-                continue
-    return None
-
-def standardize_text(text: str) -> str:
-    clean = text.lower()
-    clean = re.sub(r'[\(\[].*?[\)\]]', '', clean)
-    clean = re.sub(r'season|temporada', 's', clean)
-    clean = re.sub(r'episode|episodio', 'e', clean)
-    clean = re.sub(r'[\._\-]', ' ', clean)
-    clean = re.sub(r'\s+', ' ', clean).strip()
-    return clean
 
 class WorkerSignals(QObject):
     progress = pyqtSignal(int)
@@ -65,6 +32,10 @@ class ScanWorker(QThread):
         self._is_running = True
 
     def run(self):
+        """
+        Orquesta el proceso completo de escaneo, desde la recolección de archivos hasta
+        la emisión de los resultados, dividido en fases lógicas.
+        """
         cache = CacheManager()
         config = ConfigManager()
         priority_order = config.get("recommendation/priority_order", [])
@@ -72,110 +43,27 @@ class ScanWorker(QThread):
         ignore_list = cache.get_ignore_list()
         
         try:
-            # --- INICIO DE CORRECCIÓN: NUEVA LÓGICA DE BUCLE ---
-            
-            # Fase 1: Recolección Inteligente
-            self.signals.status_update.emit("Fase 1: Recolectando archivos...")
+            # --- FASE 1: Recolectar archivos y comparar con la caché ---
+            self.signals.status_update.emit("Fase 1: Recolectando y comparando archivos con la caché...")
             self.signals.set_progress_bar_indeterminate.emit(True)
-            self.signals.progress.emit(0)
-
-            all_media_files_from_cache: List[MediaFile] = []
-            files_to_process_map: Dict[Path, str] = {} # Mapeo de archivo a su scan_path
             
-            for i, scan_path in enumerate(self.paths_to_scan):
-                if not self._is_running: break
-                self.signals.status_update.emit(f"Verificando ruta ({i+1}/{len(self.paths_to_scan)}): {scan_path}...")
-
-                if not scan_path.exists() or not scan_path.is_dir():
-                    self.signals.status_update.emit(f"Ruta offline. Usando caché para {scan_path}...")
-                    cached_files = cache.get_files_for_path(str(scan_path))
-                    all_media_files_from_cache.extend(cached_files.values())
-                    continue
-
-                files_on_disk = set(self.scanner.scan(scan_path))
-                cached_files_map = cache.get_files_for_path(str(scan_path))
-                
-                files_to_remove_from_cache = [str(p) for p in (set(cached_files_map.keys()) - files_on_disk)]
-                if files_to_remove_from_cache:
-                    cache.remove_files_batch(files_to_remove_from_cache)
-                
-                for path in files_on_disk:
-                    if path in cached_files_map:
-                        try:
-                            stats = path.stat()
-                            cached_file = cached_files_map[path]
-                            
-                            if stats.st_size != cached_file.size or stats.st_mtime != cached_file.mtime:
-                                files_to_process_map[path] = str(scan_path)
-                            else:
-                                all_media_files_from_cache.append(cached_file)
-                        except FileNotFoundError:
-                            pass # Será borrado en el próximo escaneo de esta ruta
-                    else: # Es un archivo nuevo
-                        files_to_process_map[path] = str(scan_path)
-
+            unchanged_from_cache, files_to_process_map = self._collect_and_compare_files(cache)
             if not self._is_running: self.stop_gracefully(); return
 
-            # Fase 2: Procesamiento en Lote (una sola vez)
+            # --- FASE 2: Procesar archivos nuevos/modificados y actualizar la caché ---
             self.signals.set_progress_bar_indeterminate.emit(False)
             processed_files = self._process_file_list(list(files_to_process_map.keys()))
-            
-            # Fase 3: Actualización de la Caché
-            if processed_files:
-                # Agrupar por scan_path para la actualización en lote
-                files_to_cache_by_path = defaultdict(list)
-                for file in processed_files:
-                    scan_path_str = files_to_process_map.get(file.path)
-                    if scan_path_str:
-                        files_to_cache_by_path[scan_path_str].append(file)
-                
-                for scan_path_str, files_list in files_to_cache_by_path.items():
-                    cache.update_files_batch(scan_path_str, files_list)
-
-            # Actualizar timestamps de las rutas escaneadas
-            for scan_path in self.paths_to_scan:
-                 if scan_path.exists():
-                    volume_name = scan_path.drive if scan_path.drive else str(scan_path.parts[0])
-                    cache.update_scan_path(str(scan_path), volume_name)
-
             if not self._is_running: self.stop_gracefully(); return
-            
-            # Unir las listas para el análisis final
-            all_media_files_final = all_media_files_from_cache + processed_files
 
-            # --- FIN DE CORRECCIÓN ---
+            self._update_cache_with_new_files(cache, processed_files, files_to_process_map)
+            
+            # --- FASE 3: Identificar duplicados, filtrar y aplicar recomendaciones ---
+            all_media_files_final = unchanged_from_cache + processed_files
             
             self.signals.status_update.emit(f"Fase final: Identificando duplicados en {len(all_media_files_final)} archivos...")
             self.signals.progress.emit(100)
             
-            duplicate_structure = self.matcher.find_duplicates(all_media_files_final)
-            
-            filtered_series = {}
-            for series_title, episodes in duplicate_structure.get("series", {}).items():
-                series_id = standardize_text(series_title)
-                if series_id in ignore_list: continue
-                valid_episodes = []
-                for group in episodes:
-                    episode_id = f"{series_id}/{group.group_id}"
-                    if episode_id not in ignore_list:
-                        valid_episodes.append(group)
-                if valid_episodes:
-                    filtered_series[series_title] = valid_episodes
-            duplicate_structure["series"] = filtered_series
-
-            filtered_movies = []
-            for movie_group in duplicate_structure.get("movies", []):
-                movie_id = standardize_text(movie_group.display_title)
-                if movie_id not in ignore_list:
-                    filtered_movies.append(movie_group)
-            duplicate_structure["movies"] = filtered_movies
-
-            self.signals.status_update.emit("Aplicando recomendaciones...")
-            for series_title, duplicate_episodes in duplicate_structure.get("series", {}).items():
-                for group in duplicate_episodes:
-                    recommender.apply_recommendations(group)
-            for movie_group in duplicate_structure.get("movies", []):
-                recommender.apply_recommendations(movie_group)
+            duplicate_structure = self._find_and_process_duplicates(all_media_files_final, recommender, ignore_list)
             
             if self._is_running:
                 self.signals.results_ready.emit(duplicate_structure)
@@ -187,11 +75,109 @@ class ScanWorker(QThread):
         finally:
             cache.close()
             self.signals.finished.emit()
+            
+    def _collect_and_compare_files(self, cache: CacheManager) -> Tuple[List[MediaFile], Dict[Path, str]]:
+        """
+        Recorre las rutas de escaneo, las compara con la caché y devuelve dos colecciones:
+        - Una lista de MediaFiles que no han cambiado y se pueden usar directamente.
+        - Un diccionario de archivos nuevos o modificados que necesitan ser procesados.
+        """
+        unchanged_files = []
+        files_to_process_map = {}
+        
+        for i, scan_path in enumerate(self.paths_to_scan):
+            if not self._is_running: break
+            self.signals.status_update.emit(f"Verificando ruta ({i+1}/{len(self.paths_to_scan)}): {scan_path}...")
+
+            # Manejar rutas desconectadas o no existentes
+            if not scan_path.exists() or not scan_path.is_dir():
+                cached_files = cache.get_files_for_path(str(scan_path))
+                unchanged_files.extend(cached_files.values())
+                continue
+
+            # Sincronizar caché con el disco
+            volume_name = scan_path.drive if scan_path.drive else str(scan_path.parts[0])
+            cache.update_scan_path(str(scan_path), volume_name)
+            
+            files_on_disk = set(self.scanner.scan(scan_path))
+            cached_files_map = cache.get_files_for_path(str(scan_path))
+            
+            # Eliminar de la caché archivos que ya no existen en el disco
+            files_to_remove_from_cache = [str(p) for p in (set(cached_files_map.keys()) - files_on_disk)]
+            if files_to_remove_from_cache:
+                cache.remove_files_batch(files_to_remove_from_cache)
+            
+            # Comparar cada archivo en el disco con su entrada en la caché
+            for path in files_on_disk:
+                cached_file = cached_files_map.get(path)
+                if cached_file:
+                    try:
+                        stats = path.stat()
+                        if stats.st_size != cached_file.size or stats.st_mtime != cached_file.mtime:
+                            files_to_process_map[path] = str(scan_path) # Modificado
+                        else:
+                            unchanged_files.append(cached_file) # Sin cambios
+                    except FileNotFoundError: pass
+                else:
+                    files_to_process_map[path] = str(scan_path) # Nuevo
+
+        return unchanged_files, files_to_process_map
+
+    def _update_cache_with_new_files(self, cache: CacheManager, processed_files: List[MediaFile], files_to_process_map: Dict[Path, str]):
+        """Actualiza la caché con los archivos que acaban de ser procesados."""
+        if not processed_files:
+            return
+            
+        files_to_cache_by_path = defaultdict(list)
+        for file in processed_files:
+            scan_path_str = files_to_process_map.get(file.path)
+            if scan_path_str:
+                files_to_cache_by_path[scan_path_str].append(file)
+        
+        for scan_path_str, files_list in files_to_cache_by_path.items():
+            cache.update_files_batch(scan_path_str, files_list)
+
+    def _find_and_process_duplicates(self, all_files: List[MediaFile], recommender: Recommender, ignore_list: Set[str]) -> Dict:
+        """
+        Ejecuta el matcher, filtra los duplicados según la lista de ignorados
+        y aplica las recomendaciones de prioridad.
+        """
+        # Encontrar duplicados
+        duplicate_structure = self.matcher.find_duplicates(all_files)
+        
+        # Filtrar por lista de ignorados
+        filtered_series = {}
+        for series_title, episodes in duplicate_structure.get("series", {}).items():
+            series_id = standardize_text(series_title)
+            if series_id in ignore_list: continue
+            valid_episodes = [group for group in episodes if f"{series_id}/{group.group_id}" not in ignore_list]
+            if valid_episodes: filtered_series[series_title] = valid_episodes
+        duplicate_structure["series"] = filtered_series
+
+        filtered_movies = [group for group in duplicate_structure.get("movies", []) if standardize_text(group.display_title) not in ignore_list]
+        duplicate_structure["movies"] = filtered_movies
+        
+        # Aplicar recomendaciones
+        self.signals.status_update.emit("Aplicando recomendaciones...")
+        for series_title, duplicate_episodes in duplicate_structure.get("series", {}).items():
+            for group in duplicate_episodes:
+                recommender.apply_recommendations(group)
+        for movie_group in duplicate_structure.get("movies", []):
+            recommender.apply_recommendations(movie_group)
+        
+        return duplicate_structure
 
     def _process_file_list(self, files_to_process: List[Path]) -> List[MediaFile]:
+        """
+        Procesa una lista de archivos, extrayendo metadatos y parseando información.
+        Emite señales de progreso durante la operación.
+        """
         processed = []
         total = len(files_to_process)
         if total == 0: return []
+        
+        self.signals.status_update.emit(f"Fase 2: Procesando {total} archivos nuevos/modificados...")
+        
         for i, file_path in enumerate(files_to_process):
              if not self._is_running: break
              self.signals.status_update.emit(f"Procesando ({i+1}/{total}): {file_path.name}")
@@ -203,6 +189,7 @@ class ScanWorker(QThread):
                 parsed_info = {}
                 if ep_info:
                     parsed_info['season'], parsed_info['episode'] = ep_info
+                
                 media_file = MediaFile(
                     path=file_path, size=stats.st_size, mtime=stats.st_mtime,
                     parsed_info=parsed_info, metadata_info=metadata

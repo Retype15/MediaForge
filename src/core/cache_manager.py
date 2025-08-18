@@ -2,7 +2,8 @@ import sqlite3
 import json
 import time
 from pathlib import Path
-from typing import List, Optional, Dict, Set
+from typing import List, Dict, Set
+from src.core.models import MediaFile
 
 DB_FILE = "mediaforge_cache.db"
 
@@ -40,6 +41,28 @@ class CacheManager:
         ''')
         self.conn.commit()
 
+    def delete_scan_path(self, path: str):
+        """
+        Elimina una ruta de escaneo de la tabla scanned_paths.
+        Gracias a 'ON DELETE CASCADE', SQLite eliminará automáticamente todos
+        los archivos en la tabla media_files que referencian esta ruta.
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM scanned_paths WHERE path = ?", (path,))
+        self.conn.commit()
+
+    def get_full_ignore_list(self) -> List[Dict[str, str]]:
+        """Devuelve la lista completa de ignorados con su nivel."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT ignore_key, ignore_level FROM ignore_list ORDER BY date_added DESC")
+        return [{"key": row[0], "level": row[1]} for row in cursor.fetchall()]
+    
+    def remove_from_ignore_list(self, key: str):
+        """Elimina un elemento de la lista de ignorados por su clave."""
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM ignore_list WHERE ignore_key = ?", (key,))
+        self.conn.commit()
+
     def get_scanned_paths(self) -> List[dict]:
         cursor = self.conn.cursor()
         cursor.execute("SELECT path, volume_name, last_scanned FROM scanned_paths ORDER BY last_scanned DESC")
@@ -52,16 +75,20 @@ class CacheManager:
             (path, volume_name, int(time.time()))
         )
         self.conn.commit()
+    
+    def remove_scan_path(self, path: str):
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM scanned_paths WHERE path = ?", (path,))
+        self.conn.commit()
 
-    def get_files_for_path(self, scan_path: str) -> Dict[Path, 'MediaFile']:
+
+    def get_files_for_path(self, scan_path: str) -> Dict[Path, MediaFile]:
         cursor = self.conn.cursor()
         cursor.execute(
             "SELECT file_path, size, mtime, parsed_info_json, metadata_info_json FROM media_files WHERE scan_path = ?",
             (scan_path,)
         )
         cached_files = {}
-        # Importación local para evitar dependencia circular
-        from src.core.models import MediaFile
         for row in cursor.fetchall():
             file_path, size, mtime, parsed_json, meta_json = row
             p_path = Path(file_path)
@@ -74,18 +101,19 @@ class CacheManager:
             )
         return cached_files
 
-    def update_files_batch(self, scan_path: str, files: List['MediaFile']):
+    def update_files_batch(self, scan_path: str, files: List[MediaFile]):
         cursor = self.conn.cursor()
-        data_to_insert = [
-            (
+        data_to_insert = []
+        for file in files:
+            data_to_insert.append((
                 str(file.path),
                 scan_path,
                 file.size,
                 file.mtime,
                 json.dumps(file.parsed_info),
                 json.dumps(file.metadata_info) if file.metadata_info else None
-            ) for file in files
-        ]
+            ))
+        
         cursor.executemany(
             "INSERT OR REPLACE INTO media_files (file_path, scan_path, size, mtime, parsed_info_json, metadata_info_json) VALUES (?, ?, ?, ?, ?, ?)",
             data_to_insert
@@ -112,17 +140,5 @@ class CacheManager:
         cursor.execute("SELECT ignore_key FROM ignore_list")
         return {row[0] for row in cursor.fetchall()}
 
-    def get_full_ignore_list(self) -> List[Dict[str, str]]:
-        """Devuelve la lista completa de ignorados con su nivel."""
-        cursor = self.conn.cursor()
-        cursor.execute("SELECT ignore_key, ignore_level FROM ignore_list ORDER BY ignore_key ASC")
-        return [{"key": row[0], "level": row[1]} for row in cursor.fetchall()]
-
-    def remove_from_ignore_list(self, key: str):
-        """Elimina una entrada de la lista de ignorados por su clave."""
-        cursor = self.conn.cursor()
-        cursor.execute("DELETE FROM ignore_list WHERE ignore_key = ?", (key,))
-        self.conn.commit()
-        
     def close(self):
         self.conn.close()
